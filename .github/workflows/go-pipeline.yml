@@ -1,0 +1,208 @@
+# TODO rm GOPRIVATE settings once public
+name: Golang Library Pipeline
+
+on:
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - '*.md'
+      - '.github/**'
+      - '.devcontainer/**'
+      - '*.code-workspace'
+  pull_request:
+    types: [ assigned, opened, synchronize, reopened ]
+
+# By default, no permissions are given to any job's GITHUB_TOKEN
+permissions:
+  contents: read
+
+jobs:
+  vettest:
+    name: Go quality vetting and testing
+    runs-on: ubuntu-22.04
+    env:
+      GOPRIVATE: github.com/ping-42/*
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setting up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          check-latest: true
+        id: go
+
+      - uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.DEPLOY_KEY }}
+
+      - name: Configuring git for private modules...
+        shell: bash
+        run: |
+          git config --global url."ssh://git@github.com/".insteadOf https://github.com/
+
+      - name: Getting dependencies...
+        shell: bash
+        run: |
+          go get -v -t -d ./...
+
+      - name: Vetting code...
+        shell: bash
+        run: |
+          go vet ./...
+
+      # We want to exclude certain folders from testing, since they contain stuff like structures
+      - name: Testing code...
+        shell: bash
+        run: |
+          go install github.com/ory/go-acc@latest
+          go-acc -o coverage.txt ./...
+
+  golangci:
+    name: Static analysis via golangci-lint
+    runs-on: ubuntu-22.04
+    env:
+      GOPRIVATE: github.com/ping-42/*
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setting up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          check-latest: true
+        id: go
+
+      - uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.DEPLOY_KEY }}
+
+      - name: Configuring git for private modules...
+        shell: bash
+        run: |
+          git config --global url."ssh://git@github.com/".insteadOf https://github.com/
+
+      - name: Getting dependencies...
+        shell: bash
+        run: |
+          go get -v -t -d ./...
+
+      - name: Run golangci-lint linter
+        uses: golangci/golangci-lint-action@v4
+        with:
+          version: v1.55.2
+          args: --timeout 5m
+          skip-pkg-cache: true
+
+  gosec:
+    name: Static analysis via gosec
+    runs-on: ubuntu-22.04
+    env:
+      GOPRIVATE: github.com/ping-42/*
+      GO111MODULE: on
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setting up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          check-latest: true
+        id: go
+
+      - uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.DEPLOY_KEY }}
+
+      - name: Configuring git for private modules...
+        shell: bash
+        run: |
+          git config --global url."ssh://git@github.com/".insteadOf https://github.com/
+
+      - name: Run Gosec...
+        shell: bash
+        run: |
+          go get -d ./...
+          go install github.com/securego/gosec/v2/cmd/gosec@latest
+          gosec -tests ./...
+
+  govuln:
+    name: Go vulnerability database check
+    runs-on: ubuntu-22.04
+    env:
+      GOPRIVATE: github.com/ping-42/*
+      GO111MODULE: on
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setting up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          check-latest: true
+
+      - uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.DEPLOY_KEY }}
+
+      - name: Configuring git for private modules...
+        shell: bash
+        run: |
+          git config --global url."ssh://git@github.com/".insteadOf https://github.com/
+
+      - name: Govuln check
+        shell: bash
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          govulncheck ./...
+
+  create-tag:
+    name: Ship a release
+    runs-on: ubuntu-22.04
+    needs: [vettest,golangci,gosec,govuln]
+    permissions:
+      contents: write
+      pull-requests: read
+    if:
+      contains('
+        refs/heads/master
+        refs/heads/main
+      ', github.ref)
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          token: ${{ github.token }}
+
+      - name: Bump version and push tag
+        id: tag_version
+        uses: mathieudutour/github-tag-action@v6.1
+        with:
+          github_token: ${{ github.token }}
+          tag_prefix: v
+
+      - name: Create release
+        uses: actions/github-script@v7
+        env:
+          RELEASE_TAG: ${{ steps.tag_version.outputs.new_tag }}
+        with:
+          github-token: "${{ github.token }}"
+          script: |
+            try {
+              await github.rest.repos.createRelease({
+                draft: true,
+                generate_release_notes: true,
+                name: "Release " + process.env.RELEASE_TAG,
+                owner: context.repo.owner,
+                prerelease: false,
+                repo: context.repo.repo,
+                tag_name: process.env.RELEASE_TAG,
+              });
+            } catch (error) {
+              core.setFailed(error.message);
+            }
