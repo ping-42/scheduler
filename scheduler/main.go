@@ -3,15 +3,18 @@ package main
 import (
 	"context"
 	"fmt"
+	"math/rand"
 	"time"
 
 	"github.com/go-redis/redis"
 	"github.com/google/uuid"
 	"github.com/ping-42/42lib/config"
 	"github.com/ping-42/42lib/config/consts"
+	"github.com/ping-42/42lib/constants"
 	"github.com/ping-42/42lib/db"
 	"github.com/ping-42/42lib/db/models"
 	"github.com/ping-42/42lib/logger"
+	"github.com/robfig/cron/v3"
 	"gorm.io/gorm"
 )
 
@@ -41,6 +44,16 @@ func init() {
 func main() {
 
 	schedulerLogger.Info("Starting...")
+
+	c := cron.New()
+	c.AddFunc("@every 5m", func() {
+		// Call your function here
+		fmt.Println("Function called every 5 minutes using cron")
+	})
+	c.Start()
+
+	// Run indefinitely
+	select {}
 
 	// select the supscriptions that have tasks for execution
 	pengingSubscriptions, err := getPendingSubscriptions()
@@ -89,18 +102,92 @@ func getPendingSubscriptions() (clientSubscriptions []models.ClientSubscription,
 }
 
 func chooseSensorsByRank(numberOfSensors int) (sensors []models.Sensor, err error) {
-	tx := gormClient.Raw(`
-	SELECT sensors.*, sensor_ranks.current_rank
-		FROM sensors
-		JOIN sensor_ranks ON sensors.id = sensor_ranks.sensor_id
-		ORDER BY sensor_ranks.current_rank DESC
-	LIMIT ?`, numberOfSensors).Scan(&sensors)
+	// TODO TMP function: will be removed once Kosio is ready with the sensor Ranks
+	// select the active sensors from redis and attach dummy Ranks
+	dummyAssignScoreToEachActiveSensor()
 
-	if tx.Error != nil {
-		err = fmt.Errorf("getting Sensor err:%v", tx.Error)
+	// Retrieve the first X records with the highest rank
+	chosenSensorsRedis, err := redisClient.ZRevRangeWithScores(constants.RedisActiveSensorsRankKey, 0, int64(numberOfSensors-1)).Result()
+	if err != nil {
+		err = fmt.Errorf("ZRevRangeWithScores err:%v", err)
 		return
 	}
+
+	if len(chosenSensorsRedis) == 0 {
+		err = fmt.Errorf("No active sensors with populated rate")
+		return
+	}
+
+	var chosenSensorsIds []uuid.UUID
+
+	// Iterate over the results
+	for _, sensor := range chosenSensorsRedis {
+		sensorId := sensor.Member.(string)
+		sensorScore := sensor.Score
+
+		var sid uuid.UUID
+		sid, err = uuid.FromBytes([]byte(sensorId))
+
+		schedulerLogger.Info(fmt.Sprintf("ChosenSensor sensorId: %v, Rank: %.2f\n, numberOfSensors:%v", sid.String(), sensorScore, numberOfSensors))
+
+		if err != nil {
+			err = fmt.Errorf("can not convert sensorId from redis to uuid:%v err:%v", sensorId, err)
+			return
+		}
+		chosenSensorsIds = append(chosenSensorsIds, sid)
+	}
+
+	dbResult := gormClient.Where("id IN (?)", chosenSensorsIds).Find(&sensors)
+	if dbResult.Error != nil {
+		err = fmt.Errorf("db error while getting chosenSensorsIds err:%v", err)
+		return
+	}
+
 	return
+}
+
+// TODO TMP function: will be removed once Kosio is ready with the sensor Ranks
+// select the active sensors from redis and attach dummy Ranks
+func dummyAssignScoreToEachActiveSensor() {
+
+	// Fetch all keys that match the prefix
+	keys, err := redisClient.Keys(constants.RedisActiveSensorsKeyPrefix + "*").Result()
+	if err != nil {
+		fmt.Printf("dummyAssignScoreToEachActiveSensor: failed to retrieve keys from Redis: %v \n", err)
+		return
+	}
+
+	schedulerLogger.Info("Currently active sensors:", keys)
+
+	// delete all currenty ranked sensors
+	_, err = redisClient.ZRemRangeByRank(constants.RedisActiveSensorsRankKey, 0, -1).Result()
+	if err != nil {
+		fmt.Println("redisClient.ZRemRangeByRank delete Error:", err)
+		return
+	}
+
+	// Iterate over the keys and fetch their corresponding values
+	for _, key := range keys {
+		sensor_id, err := redisClient.Get(key).Result()
+		if err != nil {
+			fmt.Printf("dummyAssignScoreToEachActiveSensor: Failed to retrieve value for key %s: %v\n", key, err)
+			continue
+		}
+
+		// Add a member with a score to the sorted set.
+		err = redisClient.ZAdd(constants.RedisActiveSensorsRankKey, redis.Z{Score: rand.Float64(), Member: sensor_id}).Err()
+		if err != nil {
+			fmt.Println("redisClient.ZAdd Error:", err)
+			return
+		}
+	}
+
+	// // Set TTL for the sorted set key.
+	// err = redisClient.Expire(constants.RedisActiveSensorsRankKey, 5*time.Minute).Err()
+	// if err != nil {
+	// 	fmt.Println("Error setting TTL:", err)
+	// 	return
+	// }
 }
 
 func initSubscriptionТаск(ctx context.Context, subscription models.ClientSubscription, sensor models.Sensor) (err error) {
