@@ -7,7 +7,7 @@ toolchain go1.22.2
 require (
 	github.com/go-redis/redis v6.15.9+incompatible
 	github.com/google/uuid v1.6.0
-	github.com/ping-42/42lib v0.1.3
+	github.com/ping-42/42lib v0.1.10
 	gorm.io/gorm v1.25.9
 )
 
