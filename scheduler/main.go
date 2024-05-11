@@ -44,16 +44,21 @@ func init() {
 func main() {
 
 	schedulerLogger.Info("Starting...")
+	work()
 
 	c := cron.New()
-	c.AddFunc("@every 5m", func() {
-		// Call your function here
-		fmt.Println("Function called every 5 minutes using cron")
+	c.AddFunc("@every 1m", func() {
+		work()
 	})
 	c.Start()
 
 	// Run indefinitely
 	select {}
+}
+
+func work() {
+
+	schedulerLogger.Info("Sheduler triggered...")
 
 	// select the supscriptions that have tasks for execution
 	pengingSubscriptions, err := getPendingSubscriptions()
