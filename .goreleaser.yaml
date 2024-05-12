@@ -20,6 +20,7 @@ builds:
     - -s -w -X main.version={{.Version}} -X main.commit={{.Commit}} -X main.date={{ .CommitDate }}
   id: "scheduler"
   binary: "scheduler"
+  main: ./scheduler/
 
 # proxies from the go mod proxy before building
 # https://goreleaser.com/customization/gomod
