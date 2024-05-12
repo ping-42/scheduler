@@ -22,11 +22,6 @@ builds:
   binary: "scheduler"
   main: ./scheduler/
 
-# proxies from the go mod proxy before building
-# https://goreleaser.com/customization/gomod
-gomod:
-  proxy: true
-
 # config the checksum filename
 # https://goreleaser.com/customization/checksum
 checksum:
