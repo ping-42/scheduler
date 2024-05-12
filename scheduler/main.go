@@ -47,9 +47,15 @@ func main() {
 	work()
 
 	c := cron.New()
-	c.AddFunc("@every 1m", func() {
+	_, err := c.AddFunc("@every 1m", func() {
 		work()
 	})
+
+	if err != nil {
+		schedulerLogger.Error("run cron err:", err.Error())
+		return
+	}
+
 	c.Start()
 
 	// Run indefinitely
@@ -180,7 +186,7 @@ func dummyAssignScoreToEachActiveSensor() {
 		}
 
 		// Add a member with a score to the sorted set.
-		err = redisClient.ZAdd(constants.RedisActiveSensorsRankKey, redis.Z{Score: rand.Float64(), Member: sensor_id}).Err()
+		err = redisClient.ZAdd(constants.RedisActiveSensorsRankKey, redis.Z{Score: rand.Float64(), Member: sensor_id}).Err() // #nosec
 		if err != nil {
 			fmt.Println("redisClient.ZAdd Error:", err)
 			return
