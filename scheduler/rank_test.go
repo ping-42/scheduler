@@ -158,8 +158,9 @@ func Test_Rank(t *testing.T) {
 	}
 }
 
-var id = map[int]uuid.UUID{
-	1: uuid.MustParse("3f8f0e4d-6723-4d52-a1b8-8a203af94765"),
-	2: uuid.MustParse("352e751c-5c7d-411a-9c9c-9a9a036fccb3"),
-	3: uuid.MustParse("afb51543-b7c7-4324-9fe9-46a20295a50a"),
+var id = [4]uuid.UUID{
+	uuid.MustParse("3f8f0e4d-6723-4d52-a1b8-8a203af94765"),
+	uuid.MustParse("3f8f0e4d-6723-4d52-a1b8-8a203af94765"),
+	uuid.MustParse("352e751c-5c7d-411a-9c9c-9a9a036fccb3"),
+	uuid.MustParse("afb51543-b7c7-4324-9fe9-46a20295a50a"),
 }
