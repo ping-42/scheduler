@@ -162,10 +162,4 @@ var id = map[int]uuid.UUID{
 	1: uuid.MustParse("3f8f0e4d-6723-4d52-a1b8-8a203af94765"),
 	2: uuid.MustParse("352e751c-5c7d-411a-9c9c-9a9a036fccb3"),
 	3: uuid.MustParse("afb51543-b7c7-4324-9fe9-46a20295a50a"),
-	4: uuid.MustParse("4f1ddde4-f9af-4fda-8f8e-2f381ab06e58"),
-	5: uuid.MustParse("ea173492-71ef-4104-92c8-f4441960a41a"),
-	6: uuid.MustParse("0fcbf6f0-51ee-4b97-8375-dc56a671858f"),
-	7: uuid.MustParse("a427c4ac-b594-4d06-a18c-906f0dd901b3"),
-	8: uuid.MustParse("d87b5cc4-de8f-4159-ab52-8756b32ad49b"),
-	9: uuid.MustParse("4c13261e-2f33-4143-8bfd-65f3802e82af"),
 }
