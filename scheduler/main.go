@@ -50,11 +50,8 @@ func rankWorkerStart(minuteInterval time.Duration) {
 	assignSensorScores(redisClient, gormClient)
 	ticker := time.NewTicker(minuteInterval * time.Minute)
 	defer ticker.Stop()
-	for {
-		select {
-		case <-ticker.C:
-			assignSensorScores(redisClient, gormClient)
-		}
+	for range ticker.C {
+		assignSensorScores(redisClient, gormClient)
 	}
 }
 
@@ -62,11 +59,8 @@ func schedulerWorkerStart(minuteInterval time.Duration) {
 	work()
 	ticker := time.NewTicker(minuteInterval * time.Minute)
 	defer ticker.Stop()
-	for {
-		select {
-		case <-ticker.C:
-			work()
-		}
+	for range ticker.C {
+		work()
 	}
 }
 

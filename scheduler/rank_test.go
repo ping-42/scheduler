@@ -14,7 +14,6 @@ type rankTestCase struct {
 	name           string
 	input          RankerData
 	expectedOutput []models.SensorRank
-	expectedError  error
 }
 
 var testCases = []rankTestCase{
