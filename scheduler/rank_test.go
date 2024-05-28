@@ -144,15 +144,22 @@ func Test_Rank(t *testing.T) {
 		t.Run(tc.name, func(t2 *testing.T) {
 			results := getSensorRanks(tc.input)
 			assert.Equal(t2, len(results), len(tc.expectedOutput), "result length")
-			for i, actual := range results {
-				assert.Equal(t2, tc.expectedOutput[i].SensorID, actual.SensorID, "sensor_id missmatch")
-				assert.Equal(t2, tc.expectedOutput[i].Rank, actual.Rank, "rank missmatch")
 
-				// dist rank is based on time calculations,
-				// so the actual number has varying decimal value - assert without decimals
-				actualDistRank := fmt.Sprintf("%.0f", actual.DistributionRank)
-				expectedDistRank := fmt.Sprintf("%.0f", tc.expectedOutput[i].DistributionRank)
-				assert.Equal(t2, expectedDistRank, actualDistRank, "distribution_rank missmatch")
+			// the results don't have a guaranteed order;
+			// ensure every expected sensor is present in the resul
+			for _, actual := range results {
+				for _, expected := range tc.expectedOutput {
+					if expected.SensorID != actual.SensorID {
+						break
+					}
+
+					// dist rank is based on time calculations,
+					// so the actual number has varying decimal value - assert without decimals
+					actualDistRank := fmt.Sprintf("%.0f", actual.DistributionRank)
+					expectedDistRank := fmt.Sprintf("%.0f", expected.DistributionRank)
+					assert.Equal(t2, expected.Rank, actual.Rank, "rank missmatch")
+					assert.Equal(t2, expectedDistRank, actualDistRank, "distribution_rank missmatch")
+				}
 			}
 		})
 	}
