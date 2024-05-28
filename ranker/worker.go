@@ -78,12 +78,10 @@ func getRankerData(redisClient *redis.Client, dbClient *gorm.DB, rankLogger *log
 	data.RuntimeStats, err = models.GetRuntimeStats(dbClient, interval, activeSensors)
 	if err != nil {
 		rankLogger.Errorf("failed to get runtime stats: %v", err)
+		return
 	}
 
 	data.LastSensorTasks, err = models.GetLatestSensorTasks(dbClient, activeSensors)
-	if err != nil {
-		return
-	}
 
 	return
 }
