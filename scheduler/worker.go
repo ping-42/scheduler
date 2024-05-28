@@ -31,7 +31,7 @@ func work(redisClient *redis.Client, dbClient *gorm.DB, schedulerLogger *logrus.
 	pengingSubscriptions, err := getPendingSubscriptions(*dbClient)
 
 	if err != nil {
-		schedulerLogger.Errorf("getPendingSubscriptions err", schedulerLogger)
+		schedulerLogger.Error("getPendingSubscriptions err", schedulerLogger)
 		return
 	}
 
@@ -44,11 +44,11 @@ func work(redisClient *redis.Client, dbClient *gorm.DB, schedulerLogger *logrus.
 	// select the same number of sensors that needs to do the tasks
 	sensors, err := chooseSensorsByRank(*dbClient, len(pengingSubscriptions))
 	if err != nil {
-		schedulerLogger.Errorf("chooseSensorsByRank err", schedulerLogger)
+		schedulerLogger.Error("chooseSensorsByRank err", schedulerLogger)
 		return
 	}
 	if len(sensors) == 0 {
-		schedulerLogger.Errorf("no available sensors!")
+		schedulerLogger.Error("no available sensors!")
 		return
 	}
 
@@ -61,7 +61,7 @@ func work(redisClient *redis.Client, dbClient *gorm.DB, schedulerLogger *logrus.
 		}
 		err := initSubscriptionTask(context.Background(), pengingSubscriptions[i], sensors[j], *dbClient, redisClient, schedulerLogger)
 		if err != nil {
-			schedulerLogger.Errorf("initSubscriptionTask err", schedulerLogger)
+			schedulerLogger.Error("initSubscriptionTask err", schedulerLogger)
 			continue
 		}
 		j++

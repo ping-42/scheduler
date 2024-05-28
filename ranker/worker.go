@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/ping-42/42lib/constants"
 	"github.com/ping-42/42lib/db/models"
+	"github.com/ping-42/42lib/logger"
 	"github.com/ping-42/42lib/ranker"
 	"github.com/sirupsen/logrus"
 	"gorm.io/gorm"
@@ -43,6 +44,7 @@ func assignSensorScores(redisClient *redis.Client, dbClient *gorm.DB, rankLogger
 		rankLogger.Errorf("getRankerData error: %v", err)
 		return
 	}
+	opts.rankLogger = rankLogger
 
 	ranks := getSensorRanks(opts)
 	if len(ranks) == 0 {
@@ -87,6 +89,10 @@ func getRankerData(redisClient *redis.Client, dbClient *gorm.DB, rankLogger *log
 }
 
 func getSensorRanks(opts RankerData) []models.SensorRank {
+	if opts.rankLogger == nil {
+		opts.rankLogger = logger.Base("scheduler").WithField("unit", "sensorRank")
+	}
+
 	// use an envelope and add all ranks to it
 	sensorRanks := addRuntimeRank(nil, opts.RuntimeStats, nil)
 	sensorRanks = addDistributionRank(sensorRanks, opts.LastSensorTasks, opts.rankLogger)
