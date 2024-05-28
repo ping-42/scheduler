@@ -1,4 +1,4 @@
-package main
+package ranker
 
 import (
 	"fmt"
@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/ping-42/42lib/db/models"
+	"github.com/ping-42/42lib/logger"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -54,6 +55,7 @@ var testCases = []rankTestCase{
 					CreatedAt: time.Now().Add(-30 * time.Minute),
 				},
 			},
+			rankLogger: logger.Base("scheduler"),
 		},
 		expectedOutput: []models.SensorRank{
 			{
@@ -90,6 +92,7 @@ var testCases = []rankTestCase{
 					CreatedAt: time.Now().Add(-10 * time.Minute),
 				},
 			},
+			rankLogger: logger.Base("scheduler"),
 		},
 		expectedOutput: []models.SensorRank{
 			{
@@ -116,6 +119,7 @@ var testCases = []rankTestCase{
 					CreatedAt: time.Now().Add(-10 * time.Minute),
 				},
 			},
+			rankLogger: logger.Base("scheduler"),
 		},
 		expectedOutput: []models.SensorRank{
 			{
@@ -134,6 +138,7 @@ var testCases = []rankTestCase{
 					CreatedAt: time.Now().Add(-10 * time.Minute),
 				},
 			},
+			rankLogger: logger.Base("scheduler"),
 		},
 		expectedOutput: []models.SensorRank{},
 	},
