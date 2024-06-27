@@ -8,6 +8,7 @@ import (
 	"github.com/ping-42/42lib/dns"
 	"github.com/ping-42/42lib/http"
 	"github.com/ping-42/42lib/icmp"
+	"github.com/ping-42/42lib/traceroute"
 )
 
 func factoryTaskMessage(t models.Task) (res []byte, err error) {
@@ -33,7 +34,7 @@ func factoryTaskMessage(t models.Task) (res []byte, err error) {
 			return
 		}
 
-		res, err = json.Marshal(testIcmpTask) //nolint
+		res, err = json.Marshal(testIcmpTask) 
 		if err != nil {
 			err = fmt.Errorf("json.Marshal(testIcmpTask), %v", err)
 			return
@@ -46,9 +47,22 @@ func factoryTaskMessage(t models.Task) (res []byte, err error) {
 			return
 		}
 
-		res, err = json.Marshal(testHttpTask) //nolint
+		res, err = json.Marshal(testHttpTask) 
 		if err != nil {
 			err = fmt.Errorf("json.Marshal(testHttpTask), %v", err)
+			return
+		}
+
+	case 4: //TRACEROUTE
+		testTracerouteTask, er := traceroute.NewTaskFromModel(t)
+		if er != nil {
+			err = er
+			return
+		}
+
+		res, err = json.Marshal(testTracerouteTask) 
+		if err != nil {
+			err = fmt.Errorf("json.Marshal(testTracerouteTask), %v", err)
 			return
 		}
 
