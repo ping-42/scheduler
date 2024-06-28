@@ -21,7 +21,7 @@ builds:
     - -s -w -X main.version={{.Version}} -X main.commit={{.Commit}} -X main.date={{ .CommitDate }}
   id: "scheduler"
   binary: "scheduler"
-  main: ./scheduler/
+  main: ./
 
 # config the checksum filename
 # https://goreleaser.com/customization/checksum
