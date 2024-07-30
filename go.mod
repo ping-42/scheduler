@@ -21,7 +21,7 @@ require (
 
 require (
 	github.com/containerd/log v0.1.0 // indirect
-	github.com/docker/docker v27.0.2+incompatible // indirect
+	github.com/docker/docker v27.1.0+incompatible // indirect
 	github.com/gobwas/httphead v0.1.0 // indirect
 	github.com/gobwas/pool v0.2.1 // indirect
 	github.com/gobwas/ws v1.4.0 // indirect
