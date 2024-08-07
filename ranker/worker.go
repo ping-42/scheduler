@@ -32,12 +32,14 @@ func Work(minuteInterval time.Duration, redisClient *redis.Client, dbClient *gor
 	ticker := time.NewTicker(minuteInterval * time.Minute)
 	defer ticker.Stop()
 	for range ticker.C {
-		assignSensorScores(redisClient, dbClient, logger, int(minuteInterval.Minutes()))
+		assignSensorScores(redisClient, dbClient, logger, int(minuteInterval))
 	}
 }
 
 // assignSensorScores wraps the ranker logic - get data, calculate rank and insert in the DB
 func assignSensorScores(redisClient *redis.Client, dbClient *gorm.DB, rankLogger *logrus.Entry, interval int) {
+
+	rankLogger.Info("Ranking triggered...")
 
 	opts, err := getRankerData(redisClient, dbClient, rankLogger, interval)
 	if err != nil {
