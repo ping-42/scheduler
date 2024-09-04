@@ -28,11 +28,11 @@ type RankerData struct {
 }
 
 func Work(minuteInterval time.Duration, redisClient *redis.Client, dbClient *gorm.DB, logger *logrus.Entry) {
-	assignSensorScores(redisClient, dbClient, logger, int(minuteInterval))
+	assignSensorScores(redisClient, dbClient, logger, int(minuteInterval.Minutes()))
 	ticker := time.NewTicker(minuteInterval * time.Minute)
 	defer ticker.Stop()
 	for range ticker.C {
-		assignSensorScores(redisClient, dbClient, logger, int(minuteInterval))
+		assignSensorScores(redisClient, dbClient, logger, int(minuteInterval.Minutes()))
 	}
 }
 

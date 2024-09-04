@@ -34,7 +34,7 @@ func factoryTaskMessage(t models.Task) (res []byte, err error) {
 			return
 		}
 
-		res, err = json.Marshal(testIcmpTask) 
+		res, err = json.Marshal(testIcmpTask)
 		if err != nil {
 			err = fmt.Errorf("json.Marshal(testIcmpTask), %v", err)
 			return
@@ -47,7 +47,7 @@ func factoryTaskMessage(t models.Task) (res []byte, err error) {
 			return
 		}
 
-		res, err = json.Marshal(testHttpTask) 
+		res, err = json.Marshal(testHttpTask)
 		if err != nil {
 			err = fmt.Errorf("json.Marshal(testHttpTask), %v", err)
 			return
@@ -60,7 +60,7 @@ func factoryTaskMessage(t models.Task) (res []byte, err error) {
 			return
 		}
 
-		res, err = json.Marshal(testTracerouteTask) 
+		res, err = json.Marshal(testTracerouteTask)
 		if err != nil {
 			err = fmt.Errorf("json.Marshal(testTracerouteTask), %v", err)
 			return
@@ -75,6 +75,6 @@ func factoryTaskMessage(t models.Task) (res []byte, err error) {
 }
 
 // layer between subscription.Opts and task.Opts
-func factoryTaskOpts(clientSubscription models.ClientSubscription) (res []byte, err error) {
+func factoryTaskOpts(clientSubscription models.Subscription) (res []byte, err error) {
 	return clientSubscription.Opts, nil
 }
