@@ -172,7 +172,7 @@ func getPendingSubscriptions(gormClient gorm.DB) (clientSubscriptions []models.S
 	return
 }
 
-func chooseSensorsByRank(gormClient gorm.DB, numberOfSensors int) (sensors []models.Sensor, err error) {
+func chooseSensorsByRank(gormClient gorm.DB, numberOfSensors int) (sensors []models.Sensor, err error) { //nolint
 
 	// TODO: should be optimised; also check indexes;
 	err = gormClient.Raw(`WITH cte_sensors_latest AS (
