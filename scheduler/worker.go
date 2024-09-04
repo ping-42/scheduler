@@ -3,11 +3,13 @@ package scheduler
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/go-redis/redis"
 	"github.com/google/uuid"
 	"github.com/ping-42/42lib/config/consts"
+	"github.com/ping-42/42lib/constants"
 	"github.com/ping-42/42lib/db/models"
 	"github.com/sirupsen/logrus"
 	"gorm.io/gorm"
@@ -41,34 +43,79 @@ func work(redisClient *redis.Client, dbClient *gorm.DB, schedulerLogger *logrus.
 		return
 	}
 
-	// select the same number of sensors that needs to do the tasks
-	sensors, err := chooseSensorsByRank(*dbClient, len(pengingSubscriptions))
-	if err != nil {
-		schedulerLogger.Error("chooseSensorsByRank err", schedulerLogger)
-		return
-	}
-	if len(sensors) == 0 {
-		schedulerLogger.Error("no available sensors!")
-		return
-	}
+	//---------ORIGINAl---------
+	// // select the same number of sensors that needs to do the tasks
+	// sensors, err := chooseSensorsByRank(*dbClient, len(pengingSubscriptions))
+	// if err != nil {
+	// 	schedulerLogger.Error("chooseSensorsByRank err", schedulerLogger)
+	// 	return
+	// }
+	// if len(sensors) == 0 {
+	// 	schedulerLogger.Error("no available sensors!")
+	// 	return
+	// }
 
+	// // insert the new task to the db & publish to redis
+	// j := 0
+	// for i := 0; i < len(pengingSubscriptions); i++ {
+	// 	// if the subscriptions are more then the sensors, start from the first
+	// 	if i > len(sensors)-1 {
+	// 		j = 0
+	// 	}
+	// 	err := initSubscriptionTask(context.Background(), pengingSubscriptions[i], sensors[j], *dbClient, redisClient, schedulerLogger)
+	// 	if err != nil {
+	// 		schedulerLogger.Error("initSubscriptionTask err", schedulerLogger, err)
+	// 		continue
+	// 	}
+	// 	j++
+	// }
+	// ---------ORIGINAl---------
+
+	//----------TMP-HACK---------
+	activeSensors, err := redisClient.Keys(constants.RedisActiveSensorsKeyPrefix + "*").Result()
+	if err != nil {
+		schedulerLogger.Errorf("failed to retrieve keys from Redis: %v", err)
+		return
+	}
+	if len(activeSensors) == 0 {
+		schedulerLogger.Errorf("no active sensors")
+		return
+	}
+	// normalise values: [active_sensors<value>] -> [<value>]
+	// TODO: there should be a way to skip this
+	for k, v := range activeSensors {
+		activeSensors[k] = strings.TrimPrefix(v, constants.RedisActiveSensorsKeyPrefix)
+		if _, err = uuid.Parse(activeSensors[k]); err != nil {
+			schedulerLogger.Errorf("failed to parse active sensor UUID from redis: %v, ranking aborted", activeSensors[k])
+			return
+		}
+	}
+	schedulerLogger.Info("Currently active sensors:", activeSensors)
 	// insert the new task to the db & publish to redis
 	j := 0
 	for i := 0; i < len(pengingSubscriptions); i++ {
 		// if the subscriptions are more then the sensors, start from the first
-		if i > len(sensors)-1 {
+		if i > len(activeSensors)-1 {
 			j = 0
 		}
-		err := initSubscriptionTask(context.Background(), pengingSubscriptions[i], sensors[j], *dbClient, redisClient, schedulerLogger)
+
+		activeSensorId, err := uuid.Parse(activeSensors[j])
 		if err != nil {
-			schedulerLogger.Error("initSubscriptionTask err", schedulerLogger)
+			schedulerLogger.Errorf("failed to parse active sensor UUID from redis: %v, ranking aborted", activeSensors[j])
+			return
+		}
+
+		err = initSubscriptionTask(context.Background(), pengingSubscriptions[i], activeSensorId, *dbClient, redisClient, schedulerLogger)
+		if err != nil {
+			schedulerLogger.Error("initSubscriptionTask err", schedulerLogger, err)
 			continue
 		}
 		j++
 	}
+	//----------TMP-HACK-END--------
 }
 
-func initSubscriptionTask(ctx context.Context, subscription models.ClientSubscription, sensor models.Sensor, gormClient gorm.DB, redisClient *redis.Client, schedulerLogger *logrus.Entry) (err error) {
+func initSubscriptionTask(ctx context.Context, subscription models.Subscription, sensorId uuid.UUID, gormClient gorm.DB, redisClient *redis.Client, schedulerLogger *logrus.Entry) (err error) {
 
 	// layer between subscription.Opts and task.Opts
 	taskOpts, err := factoryTaskOpts(subscription)
@@ -78,13 +125,13 @@ func initSubscriptionTask(ctx context.Context, subscription models.ClientSubscri
 
 	// Insert the new task
 	newTask := models.Task{
-		ID:                   uuid.New(),
-		TaskTypeID:           subscription.TaskTypeID,
-		SensorID:             sensor.ID,
-		ClientSubscriptionID: subscription.ID,
-		TaskStatusID:         1, // INITIATED
-		Opts:                 taskOpts,
-		CreatedAt:            time.Now(),
+		ID:             uuid.New(),
+		TaskTypeID:     subscription.TaskTypeID,
+		SensorID:       sensorId,
+		SubscriptionID: subscription.ID,
+		TaskStatusID:   1, // INITIATED
+		Opts:           taskOpts,
+		CreatedAt:      time.Now(),
 	}
 	tx := gormClient.Create(&newTask)
 	if tx.Error != nil {
@@ -116,7 +163,7 @@ func initSubscriptionTask(ctx context.Context, subscription models.ClientSubscri
 	return
 }
 
-func getPendingSubscriptions(gormClient gorm.DB) (clientSubscriptions []models.ClientSubscription, err error) {
+func getPendingSubscriptions(gormClient gorm.DB) (clientSubscriptions []models.Subscription, err error) {
 	tx := gormClient.Where("tests_count_subscribed > tests_count_executed and ((last_execution_completed + period * interval '1 second') < ? or last_execution_completed IS NULL) AND is_active=true", time.Now()).Find(&clientSubscriptions)
 	if tx.Error != nil {
 		err = fmt.Errorf("getting ClientSubscription err:%v", tx.Error)
