@@ -2,12 +2,10 @@ module scheduler
 
 go 1.22
 
-toolchain go1.22.2
-
 require (
 	github.com/go-redis/redis v6.15.9+incompatible
 	github.com/google/uuid v1.6.0
-	github.com/ping-42/42lib v0.1.25
+	github.com/ping-42/42lib v0.1.28
 	github.com/sirupsen/logrus v1.9.3
 	github.com/stretchr/testify v1.9.0
 	gorm.io/gorm v1.25.11
@@ -21,7 +19,7 @@ require (
 
 require (
 	github.com/containerd/log v0.1.0 // indirect
-	github.com/docker/docker v27.1.2+incompatible // indirect
+	github.com/docker/docker v27.2.0+incompatible // indirect
 	github.com/gobwas/httphead v0.1.0 // indirect
 	github.com/gobwas/pool v0.2.1 // indirect
 	github.com/gobwas/ws v1.4.0 // indirect
@@ -36,11 +34,11 @@ require (
 	github.com/opencontainers/go-digest v1.0.0 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	golang.org/x/crypto v0.26.0 // indirect
-	golang.org/x/mod v0.20.0 // indirect
+	golang.org/x/mod v0.21.0 // indirect
 	golang.org/x/net v0.28.0 // indirect
 	golang.org/x/sync v0.8.0 // indirect
-	golang.org/x/sys v0.24.0 // indirect
-	golang.org/x/text v0.17.0 // indirect
+	golang.org/x/sys v0.25.0 // indirect
+	golang.org/x/text v0.18.0 // indirect
 	golang.org/x/tools v0.24.0 // indirect
 	gorm.io/driver/postgres v1.5.9 // indirect
 )
