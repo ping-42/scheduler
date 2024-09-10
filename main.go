@@ -1,8 +1,8 @@
 package main
 
 import (
-	"scheduler/ranker"
-	"scheduler/scheduler"
+	"github.com/ping-42/scheduler/ranker"
+	"github.com/ping-42/scheduler/scheduler"
 
 	"github.com/ping-42/42lib/config"
 	"github.com/ping-42/42lib/db"
