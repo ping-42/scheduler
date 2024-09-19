@@ -3,13 +3,11 @@ package scheduler
 import (
 	"context"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/go-redis/redis"
 	"github.com/google/uuid"
 	"github.com/ping-42/42lib/config/consts"
-	"github.com/ping-42/42lib/constants"
 	"github.com/ping-42/42lib/db/models"
 	"github.com/sirupsen/logrus"
 	"gorm.io/gorm"
@@ -44,75 +42,75 @@ func work(redisClient *redis.Client, dbClient *gorm.DB, schedulerLogger *logrus.
 	}
 
 	//---------ORIGINAl---------
-	// // select the same number of sensors that needs to do the tasks
-	// sensors, err := chooseSensorsByRank(*dbClient, len(pengingSubscriptions))
-	// if err != nil {
-	// 	schedulerLogger.Error("chooseSensorsByRank err", schedulerLogger)
-	// 	return
-	// }
-	// if len(sensors) == 0 {
-	// 	schedulerLogger.Error("no available sensors!")
-	// 	return
-	// }
-
-	// // insert the new task to the db & publish to redis
-	// j := 0
-	// for i := 0; i < len(pengingSubscriptions); i++ {
-	// 	// if the subscriptions are more then the sensors, start from the first
-	// 	if i > len(sensors)-1 {
-	// 		j = 0
-	// 	}
-	// 	err := initSubscriptionTask(context.Background(), pengingSubscriptions[i], sensors[j], *dbClient, redisClient, schedulerLogger)
-	// 	if err != nil {
-	// 		schedulerLogger.Error("initSubscriptionTask err", schedulerLogger, err)
-	// 		continue
-	// 	}
-	// 	j++
-	// }
-	// ---------ORIGINAl---------
-
-	//----------TMP-HACK---------
-	activeSensors, err := redisClient.Keys(constants.RedisActiveSensorsKeyPrefix + "*").Result()
+	// select the same number of sensors that needs to do the tasks
+	sensors, err := chooseSensorsByRank(*dbClient, len(pengingSubscriptions))
 	if err != nil {
-		schedulerLogger.Errorf("failed to retrieve keys from Redis: %v", err)
+		schedulerLogger.Error("chooseSensorsByRank err", schedulerLogger)
 		return
 	}
-	if len(activeSensors) == 0 {
-		schedulerLogger.Errorf("no active sensors")
+	if len(sensors) == 0 {
+		schedulerLogger.Error("no available sensors!")
 		return
 	}
-	// normalise values: [active_sensors<value>] -> [<value>]
-	// TODO: there should be a way to skip this
-	for k, v := range activeSensors {
-		activeSensors[k] = strings.TrimPrefix(v, constants.RedisActiveSensorsKeyPrefix)
-		if _, err = uuid.Parse(activeSensors[k]); err != nil {
-			schedulerLogger.Errorf("failed to parse active sensor UUID from redis: %v, ranking aborted", activeSensors[k])
-			return
-		}
-	}
-	schedulerLogger.Info("Currently active sensors:", activeSensors)
+
 	// insert the new task to the db & publish to redis
 	j := 0
 	for i := 0; i < len(pengingSubscriptions); i++ {
 		// if the subscriptions are more then the sensors, start from the first
-		if i > len(activeSensors)-1 {
+		if i > len(sensors)-1 {
 			j = 0
 		}
-
-		activeSensorId, err := uuid.Parse(activeSensors[j])
-		if err != nil {
-			schedulerLogger.Errorf("failed to parse active sensor UUID from redis: %v, ranking aborted", activeSensors[j])
-			return
-		}
-
-		err = initSubscriptionTask(context.Background(), pengingSubscriptions[i], activeSensorId, *dbClient, redisClient, schedulerLogger)
+		err := initSubscriptionTask(context.Background(), pengingSubscriptions[i], sensors[j].ID, *dbClient, redisClient, schedulerLogger)
 		if err != nil {
 			schedulerLogger.Error("initSubscriptionTask err", schedulerLogger, err)
 			continue
 		}
 		j++
 	}
-	//----------TMP-HACK-END--------
+	// ---------ORIGINAl---------
+
+	// //----------TMP-HACK---------
+	// activeSensors, err := redisClient.Keys(constants.RedisActiveSensorsKeyPrefix + "*").Result()
+	// if err != nil {
+	// 	schedulerLogger.Errorf("failed to retrieve keys from Redis: %v", err)
+	// 	return
+	// }
+	// if len(activeSensors) == 0 {
+	// 	schedulerLogger.Errorf("no active sensors")
+	// 	return
+	// }
+	// // normalise values: [active_sensors<value>] -> [<value>]
+	// // TODO: there should be a way to skip this
+	// for k, v := range activeSensors {
+	// 	activeSensors[k] = strings.TrimPrefix(v, constants.RedisActiveSensorsKeyPrefix)
+	// 	if _, err = uuid.Parse(activeSensors[k]); err != nil {
+	// 		schedulerLogger.Errorf("failed to parse active sensor UUID from redis: %v, ranking aborted", activeSensors[k])
+	// 		return
+	// 	}
+	// }
+	// schedulerLogger.Info("Currently active sensors:", activeSensors)
+	// // insert the new task to the db & publish to redis
+	// j := 0
+	// for i := 0; i < len(pengingSubscriptions); i++ {
+	// 	// if the subscriptions are more then the sensors, start from the first
+	// 	if i > len(activeSensors)-1 {
+	// 		j = 0
+	// 	}
+
+	// 	activeSensorId, err := uuid.Parse(activeSensors[j])
+	// 	if err != nil {
+	// 		schedulerLogger.Errorf("failed to parse active sensor UUID from redis: %v, ranking aborted", activeSensors[j])
+	// 		return
+	// 	}
+
+	// 	err = initSubscriptionTask(context.Background(), pengingSubscriptions[i], activeSensorId, *dbClient, redisClient, schedulerLogger)
+	// 	if err != nil {
+	// 		schedulerLogger.Error("initSubscriptionTask err", schedulerLogger, err)
+	// 		continue
+	// 	}
+	// 	j++
+	// }
+	// //----------TMP-HACK-END--------
 }
 
 func initSubscriptionTask(ctx context.Context, subscription models.Subscription, sensorId uuid.UUID, gormClient gorm.DB, redisClient *redis.Client, schedulerLogger *logrus.Entry) (err error) {
