@@ -1,6 +1,7 @@
 package main
 
 import (
+	"github.com/containerd/log"
 	"github.com/ping-42/scheduler/ranker"
 	"github.com/ping-42/scheduler/scheduler"
 
@@ -15,11 +16,22 @@ const (
 	rankWorkerIntervalMinutes = 10
 )
 
+// Release versioning magic
+var (
+	version = "dev"
+	commit  = "none"
+	date    = "unknown"
+)
+
 var schedulerLogger = logger.Base("scheduler")
 var configuration config.Configuration
 
 func main() {
-	schedulerLogger.Info("Starting...")
+	schedulerLogger.WithFields(log.Fields{
+		"version":   version,
+		"commit":    commit,
+		"buildDate": date,
+	}).Info("Starting PING42 Scheduler Service ...")
 
 	configuration = config.GetConfig()
 
