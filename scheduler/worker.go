@@ -41,7 +41,6 @@ func work(redisClient *redis.Client, dbClient *gorm.DB, schedulerLogger *logrus.
 		return
 	}
 
-	//---------ORIGINAl---------
 	// select the same number of sensors that needs to do the tasks
 	sensors, err := chooseSensorsByRank(*dbClient, len(pengingSubscriptions))
 	if err != nil {
@@ -60,57 +59,13 @@ func work(redisClient *redis.Client, dbClient *gorm.DB, schedulerLogger *logrus.
 		if i > len(sensors)-1 {
 			j = 0
 		}
-		err := initSubscriptionTask(context.Background(), pengingSubscriptions[i], sensors[j].ID, *dbClient, redisClient, schedulerLogger)
+		err := initSubscriptionTask(context.TODO(), pengingSubscriptions[i], sensors[j].ID, *dbClient, redisClient, schedulerLogger)
 		if err != nil {
 			schedulerLogger.Error("initSubscriptionTask err", schedulerLogger, err)
 			continue
 		}
 		j++
 	}
-	// ---------ORIGINAl---------
-
-	// //----------TMP-HACK---------
-	// activeSensors, err := redisClient.Keys(constants.RedisActiveSensorsKeyPrefix + "*").Result()
-	// if err != nil {
-	// 	schedulerLogger.Errorf("failed to retrieve keys from Redis: %v", err)
-	// 	return
-	// }
-	// if len(activeSensors) == 0 {
-	// 	schedulerLogger.Errorf("no active sensors")
-	// 	return
-	// }
-	// // normalise values: [active_sensors<value>] -> [<value>]
-	// // TODO: there should be a way to skip this
-	// for k, v := range activeSensors {
-	// 	activeSensors[k] = strings.TrimPrefix(v, constants.RedisActiveSensorsKeyPrefix)
-	// 	if _, err = uuid.Parse(activeSensors[k]); err != nil {
-	// 		schedulerLogger.Errorf("failed to parse active sensor UUID from redis: %v, ranking aborted", activeSensors[k])
-	// 		return
-	// 	}
-	// }
-	// schedulerLogger.Info("Currently active sensors:", activeSensors)
-	// // insert the new task to the db & publish to redis
-	// j := 0
-	// for i := 0; i < len(pengingSubscriptions); i++ {
-	// 	// if the subscriptions are more then the sensors, start from the first
-	// 	if i > len(activeSensors)-1 {
-	// 		j = 0
-	// 	}
-
-	// 	activeSensorId, err := uuid.Parse(activeSensors[j])
-	// 	if err != nil {
-	// 		schedulerLogger.Errorf("failed to parse active sensor UUID from redis: %v, ranking aborted", activeSensors[j])
-	// 		return
-	// 	}
-
-	// 	err = initSubscriptionTask(context.Background(), pengingSubscriptions[i], activeSensorId, *dbClient, redisClient, schedulerLogger)
-	// 	if err != nil {
-	// 		schedulerLogger.Error("initSubscriptionTask err", schedulerLogger, err)
-	// 		continue
-	// 	}
-	// 	j++
-	// }
-	// //----------TMP-HACK-END--------
 }
 
 func initSubscriptionTask(ctx context.Context, subscription models.Subscription, sensorId uuid.UUID, gormClient gorm.DB, redisClient *redis.Client, schedulerLogger *logrus.Entry) (err error) {
@@ -121,7 +76,7 @@ func initSubscriptionTask(ctx context.Context, subscription models.Subscription,
 		return
 	}
 
-	// Insert the new task
+	// lnsert the new task
 	newTask := models.Task{
 		ID:             uuid.New(),
 		TaskTypeID:     subscription.TaskTypeID,
@@ -144,21 +99,33 @@ func initSubscriptionTask(ctx context.Context, subscription models.Subscription,
 
 	schedulerLogger.Info(fmt.Sprintf("Publishing tasksID:%v, sensorID:%v", newTask.ID, newTask.SensorID))
 
-	// Publish the message to the channel
+	// publish the message to the channel
 	result := redisClient.Publish(consts.SchedulerNewTaskChannel, jsonMessage)
 	if result.Err() != nil {
 		err = fmt.Errorf("redisClient.Publish err:%v, tasksID:%v, sensorID:%v", result.Err().Error(), newTask.ID, newTask.SensorID)
 		return
 	}
 
-	// Update the task status to PUBLISHED_TO_REDIS_BY_SCHEDULER
-	updateTx := gormClient.Model(&models.Task{}).Where("id = ?", newTask.ID).Update("task_status_id", 2)
-	if updateTx.Error != nil {
-		err = fmt.Errorf("updating TaskStatusID err:%v", updateTx.Error)
-		return
-	}
+	transactionErr := gormClient.Transaction(func(tx *gorm.DB) error {
 
-	return
+		// update the task status to PUBLISHED_TO_REDIS_BY_SCHEDULER
+		updateTx := tx.Model(&models.Task{}).Where("id = ?", newTask.ID).Update("task_status_id", 2)
+		if updateTx.Error != nil {
+			err = fmt.Errorf("updating TaskStatusID err: %v", updateTx.Error)
+			return err
+		}
+
+		// clean the current adjusted rank
+		updateTx = tx.Model(&models.SensorRank{}).Where("sensor_id = ?", sensorId.String()).Update("distribution_rank", 0)
+		if updateTx.Error != nil {
+			err = fmt.Errorf("updating distribution rank err: %v", updateTx.Error)
+			return err
+		}
+
+		return nil
+	})
+
+	return transactionErr
 }
 
 func getPendingSubscriptions(gormClient gorm.DB) (clientSubscriptions []models.Subscription, err error) {
