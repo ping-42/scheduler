@@ -19,6 +19,21 @@ import (
 	"gorm.io/gorm"
 )
 
+// TODO: the config & default config should be extracted in the 42lib
+// ContextConfig holds timeout configurations
+type ContextConfig struct {
+	DBTimeout    time.Duration
+	RedisTimeout time.Duration
+}
+
+// NewDefaultConfig returns standard timeout values
+func NewDefaultConfig() ContextConfig {
+	return ContextConfig{
+		DBTimeout:    30 * time.Second,
+		RedisTimeout: 5 * time.Second,
+	}
+}
+
 func Work(minuteInterval time.Duration, redisClient *redis.Client, dbClient *gorm.DB, logger *logrus.Entry) {
 	work(redisClient, dbClient, logger)
 	ticker := time.NewTicker(minuteInterval * time.Minute)
@@ -30,37 +45,33 @@ func Work(minuteInterval time.Duration, redisClient *redis.Client, dbClient *gor
 
 // work is the entry point for the scheduler
 func work(redisClient *redis.Client, dbClient *gorm.DB, schedulerLogger *logrus.Entry) {
+	cfg := NewDefaultConfig()
 
-	schedulerLogger.Info("Sheduler triggered...")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	dbCtx, dbCancel := context.WithTimeout(ctx, cfg.DBTimeout)
+	defer dbCancel()
 
-	// select the supscriptions that have tasks for execution
-	pengingSubscriptions, err := getPendingSubscriptions(*dbClient)
+	schedulerLogger.Info("Scheduler triggered...")
 
+	pengingSubscriptions, err := getPendingSubscriptions(dbCtx, *dbClient)
 	if err != nil {
-		schedulerLogger.Error("getPendingSubscriptions err", schedulerLogger)
+		schedulerLogger.Error("getPendingSubscriptions err", err)
 		return
 	}
 
-	schedulerLogger.Info(fmt.Sprintf("Found %v subscriptions/tasks pending for execution...", len(pengingSubscriptions)))
-	if len(pengingSubscriptions) == 0 {
-		schedulerLogger.Info("Nothing to do!")
-		return
-	}
-
-	sensors, err := chooseSensorsByRank(*dbClient, len(pengingSubscriptions))
+	sensors, err := chooseSensorsByRank(dbCtx, *dbClient)
 	if err != nil {
-		schedulerLogger.Errorf("chooseSensorsByRank error: %v", err)
-		return
-	}
-	if len(sensors) == 0 {
-		schedulerLogger.Error("no available sensors!")
+		schedulerLogger.Error("chooseSensorsByRank err", err)
 		return
 	}
 
-	j := 0
+	redisCtx, redisCancel := context.WithTimeout(ctx, cfg.RedisTimeout)
+	defer redisCancel()
+
 	for i := 0; i < len(pengingSubscriptions); i++ {
-		j = i % len(sensors)
-		err := initSubscriptionTask(context.TODO(), pengingSubscriptions[i], sensors[j].ID, *dbClient, redisClient, schedulerLogger)
+		sensorIdx := i % len(sensors)
+		err := initSubscriptionTask(redisCtx, pengingSubscriptions[i], sensors[sensorIdx].ID, *dbClient, redisClient, schedulerLogger)
 		if err != nil {
 			schedulerLogger.Errorf("initSubscriptionTask err: %v", err)
 			continue
@@ -81,7 +92,6 @@ func initSubscriptionTask(ctx context.Context,
 		return
 	}
 
-	// lnsert the new task
 	newTask := models.Task{
 		ID:             uuid.New(),
 		TaskTypeID:     subscription.TaskTypeID,
@@ -97,50 +107,44 @@ func initSubscriptionTask(ctx context.Context,
 		return
 	}
 
-	jsonMessage, err := factoryTaskMessage(newTask)
+	taskJson, err := factoryTaskMessage(newTask)
 	if err != nil {
 		return
 	}
 
 	schedulerLogger.Info(fmt.Sprintf("Publishing tasksID:%v, sensorID:%v", newTask.ID, newTask.SensorID))
 
-	// publish the message to the channel
-	result := redisClient.Publish(consts.SchedulerNewTaskChannel, jsonMessage)
+	result := redisClient.WithContext(ctx).Publish(consts.SchedulerNewTaskChannel, taskJson)
 	if result.Err() != nil {
 		err = fmt.Errorf("redisClient.Publish err:%v, tasksID:%v, sensorID:%v", result.Err().Error(), newTask.ID, newTask.SensorID)
 		return
 	}
 
-	updateStatusSensorRankErr := gormClient.Transaction(func(tx *gorm.DB) error {
-		updateTx := tx.Model(&models.Task{}).Where("id = ?", newTask.ID).Update("task_status_id", 2)
-		if updateTx.Error != nil {
-			err = fmt.Errorf("updating TaskStatusID err: %v", updateTx.Error)
-			return err
-		}
-
-		// TODO: incrementing rank should be configurable unit; right now is +1 hardcoded
-		updateTx = tx.Model(&models.SensorRank{}).Where("sensor_id = ?", sensorId.String()).Update("distribution_rank", gorm.Expr("distribution_rank + ?", 1))
-		if updateTx.Error != nil {
-			err = fmt.Errorf("updating distribution rank err: %v", updateTx.Error)
-			return err
-		}
-
-		return nil
-	})
-
-	return updateStatusSensorRankErr
-}
-
-func getPendingSubscriptions(gormClient gorm.DB) (clientSubscriptions []models.Subscription, err error) {
-	tx := gormClient.Where("tests_count_subscribed > tests_count_executed and ((last_execution_completed + period * interval '1 second') < ? or last_execution_completed IS NULL) AND is_active=true", time.Now()).Find(&clientSubscriptions)
-	if tx.Error != nil {
-		err = fmt.Errorf("getting ClientSubscription err:%v", tx.Error)
-		return
+	receiverCount, err := result.Result()
+	if err != nil {
+		return fmt.Errorf("failed to get publish result: %w", err)
 	}
-	return
+	if receiverCount == 0 {
+		return fmt.Errorf("no subscribers received task: taskID:%v, sensorID:%v", newTask.ID, newTask.SensorID)
+	}
+
+	return tx.Model(&models.Task{}).Where("id = ?", newTask.ID).Update("task_status_id", 2).Error
 }
 
-func chooseSensorsByRank(gormClient gorm.DB, numberOfSensors int) (sensors []models.Sensor, err error) { //nolint
+func getPendingSubscriptions(ctx context.Context, gormClient gorm.DB) ([]models.Subscription, error) {
+	var clientSubscriptions []models.Subscription
+	tx := gormClient.WithContext(ctx).Where(
+		"tests_count_subscribed > tests_count_executed and ((last_execution_completed + period * interval '1 second') < ? or last_execution_completed IS NULL) AND is_active=true",
+		time.Now(),
+	).Find(&clientSubscriptions)
+
+	if tx.Error != nil {
+		return nil, fmt.Errorf("getting ClientSubscription err:%w", tx.Error)
+	}
+	return clientSubscriptions, nil
+}
+
+func chooseSensorsByRank(ctx context.Context, gormClient gorm.DB) (sensors []models.Sensor, err error) { //nolint
 
 	// TODO: check indexes; add a coefficient to reduce the task count subtraction;
 	err = gormClient.Raw("" +
@@ -166,7 +170,7 @@ ORDER BY (sr.rank -
         WHEN st.task_count IS NOT NULL THEN st.task_count
         ELSE 0
     END
-) DESC`).Scan(&sensors).Error
+) DESC`).WithContext(ctx).Scan(&sensors).Error
 
 	return
 }
