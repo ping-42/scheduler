@@ -2,14 +2,8 @@ package scheduler
 
 /*
 	The scheduler service is responsible for choosing sensors for any given task.
-	It adds +N to the distribution_rank of a sensor, each time the sensor wins a task.
-	Chooses sensors ordered by their (rank - dist_rank) in a round robin manner.
-
-	TODO: problem with the above is that new sensors
-	will come with 0 dist_rank and therefore monopolise the task market.
-
-	- Use a routine or job to set all unique latest dist ranks to 0 every X hours.
-		How can race condition be avoided with that?
+	Chooses sensors ordered by their <rank - {task count for the last 10 minutes}>
+	in a round robin manner.
 */
 
 import (
@@ -55,7 +49,7 @@ func work(redisClient *redis.Client, dbClient *gorm.DB, schedulerLogger *logrus.
 
 	sensors, err := chooseSensorsByRank(*dbClient, len(pengingSubscriptions))
 	if err != nil {
-		schedulerLogger.Error("chooseSensorsByRank err", schedulerLogger)
+		schedulerLogger.Errorf("chooseSensorsByRank error: %v", err)
 		return
 	}
 	if len(sensors) == 0 {
@@ -68,7 +62,7 @@ func work(redisClient *redis.Client, dbClient *gorm.DB, schedulerLogger *logrus.
 		j = i % len(sensors)
 		err := initSubscriptionTask(context.TODO(), pengingSubscriptions[i], sensors[j].ID, *dbClient, redisClient, schedulerLogger)
 		if err != nil {
-			schedulerLogger.Error("initSubscriptionTask err", schedulerLogger, err)
+			schedulerLogger.Errorf("initSubscriptionTask err: %v", err)
 			continue
 		}
 	}
@@ -148,21 +142,31 @@ func getPendingSubscriptions(gormClient gorm.DB) (clientSubscriptions []models.S
 
 func chooseSensorsByRank(gormClient gorm.DB, numberOfSensors int) (sensors []models.Sensor, err error) { //nolint
 
-	// TODO: should be optimised; also check indexes;
-	err = gormClient.Raw(""+
+	// TODO: check indexes; add a coefficient to reduce the task count subtraction;
+	err = gormClient.Raw("" +
 		`WITH cte_sensors_latest AS (
-    SELECT max(id) as id
-        , sensor_id
-    FROM sensor_ranks
-    WHERE created_at > NOW() - INTERVAL '60 minutes'
-        AND rank > 0
-    GROUP BY sensor_id
-    LIMIT 3
+	SELECT max(id) AS id
+		, sensor_id
+	FROM sensor_ranks
+	WHERE created_at > NOW() - INTERVAL '60 minutes'
+		AND rank > 0
+	GROUP BY sensor_id
 )
-SELECT sr.sensor_id as id
+SELECT sr.sensor_id AS id, st.task_count
 FROM cte_sensors_latest cte
 INNER JOIN sensor_ranks sr ON (cte.id = sr.id)
-ORDER BY (sr.rank - sr.distribution_rank) DESC`, numberOfSensors).Scan(&sensors).Error
+LEFT JOIN (
+    SELECT sensor_id, COUNT(*) as task_count
+    FROM tasks
+    WHERE created_at > NOW() - INTERVAL '10 minutes'
+    GROUP BY sensor_id
+) AS st ON st.sensor_id = sr.sensor_id
+ORDER BY (sr.rank - 
+    CASE 
+        WHEN st.task_count IS NOT NULL THEN st.task_count
+        ELSE 0
+    END
+) DESC`).Scan(&sensors).Error
 
 	return
 }
