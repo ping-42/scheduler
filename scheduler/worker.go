@@ -66,11 +66,19 @@ func work(redisClient *redis.Client, dbClient *gorm.DB, schedulerLogger *logrus.
 		return
 	}
 
+	// important to keep this check as panic *may* occur later
+	if len(sensors) == 0 {
+		schedulerLogger.Error("no available sensors")
+		return
+	}
+
 	redisCtx, redisCancel := context.WithTimeout(ctx, cfg.RedisTimeout)
 	defer redisCancel()
 
 	for i := 0; i < len(pengingSubscriptions); i++ {
+		// this ensures a round-robin when tasks are more than the sensors
 		sensorIdx := i % len(sensors)
+
 		err := initSubscriptionTask(redisCtx, pengingSubscriptions[i], sensors[sensorIdx].ID, *dbClient, redisClient, schedulerLogger)
 		if err != nil {
 			schedulerLogger.Errorf("initSubscriptionTask err: %v", err)
