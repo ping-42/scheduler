@@ -6,7 +6,7 @@ require (
 	github.com/containerd/log v0.1.0
 	github.com/go-redis/redis v6.15.9+incompatible
 	github.com/google/uuid v1.6.0
-	github.com/ping-42/42lib v0.1.39-0.20241130105117-5ff827e8be67
+	github.com/ping-42/42lib v0.1.39
 	github.com/sirupsen/logrus v1.9.3
 	github.com/stretchr/testify v1.9.0
 	gorm.io/gorm v1.25.12
