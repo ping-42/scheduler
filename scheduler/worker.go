@@ -87,6 +87,7 @@ func work(redisClient *redis.Client, dbClient *gorm.DB, schedulerLogger *logrus.
 	}
 }
 
+// initSubscriptionTask publishes to redis and writes in the DB, it has to be refactored
 func initSubscriptionTask(ctx context.Context,
 	subscription models.Subscription,
 	sensorId uuid.UUID,
