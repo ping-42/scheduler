@@ -14,7 +14,7 @@ import (
 func factoryTaskMessage(t models.Task) (res []byte, err error) {
 
 	switch t.TaskTypeID {
-	case 1: //DNS
+	case models.TASK_DNS:
 		testDnsTask, er := dns.NewTaskFromModel(t)
 		if er != nil {
 			err = er
@@ -27,7 +27,7 @@ func factoryTaskMessage(t models.Task) (res []byte, err error) {
 			return
 		}
 
-	case 2: //ICMP
+	case models.TASK_ICMP:
 		testIcmpTask, er := icmp.NewTaskFromModel(t)
 		if er != nil {
 			err = er
@@ -40,7 +40,7 @@ func factoryTaskMessage(t models.Task) (res []byte, err error) {
 			return
 		}
 
-	case 3: //HTTP
+	case models.TASK_HTTP:
 		testHttpTask, er := http.NewTaskFromModel(t)
 		if er != nil {
 			err = er
@@ -53,7 +53,7 @@ func factoryTaskMessage(t models.Task) (res []byte, err error) {
 			return
 		}
 
-	case 4: //TRACEROUTE
+	case models.TASK_TRACEROUTE:
 		testTracerouteTask, er := traceroute.NewTaskFromModel(t)
 		if er != nil {
 			err = er

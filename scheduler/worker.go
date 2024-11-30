@@ -1,5 +1,11 @@
 package scheduler
 
+/*
+	The scheduler service is responsible for choosing sensors for any given task.
+	Chooses sensors ordered by their <rank - {task count for the last 10 minutes}>
+	in a round robin manner.
+*/
+
 import (
 	"context"
 	"fmt"
@@ -13,6 +19,21 @@ import (
 	"gorm.io/gorm"
 )
 
+// TODO: the config & default config should be extracted in the 42lib
+// ContextConfig holds timeout configurations
+type ContextConfig struct {
+	DBTimeout    time.Duration
+	RedisTimeout time.Duration
+}
+
+// NewDefaultConfig returns standard timeout values
+func NewDefaultConfig() ContextConfig {
+	return ContextConfig{
+		DBTimeout:    30 * time.Second,
+		RedisTimeout: 5 * time.Second,
+	}
+}
+
 func Work(minuteInterval time.Duration, redisClient *redis.Client, dbClient *gorm.DB, logger *logrus.Entry) {
 	work(redisClient, dbClient, logger)
 	ticker := time.NewTicker(minuteInterval * time.Minute)
@@ -24,51 +45,55 @@ func Work(minuteInterval time.Duration, redisClient *redis.Client, dbClient *gor
 
 // work is the entry point for the scheduler
 func work(redisClient *redis.Client, dbClient *gorm.DB, schedulerLogger *logrus.Entry) {
+	cfg := NewDefaultConfig()
 
-	schedulerLogger.Info("Sheduler triggered...")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	dbCtx, dbCancel := context.WithTimeout(ctx, cfg.DBTimeout)
+	defer dbCancel()
 
-	// select the supscriptions that have tasks for execution
-	pengingSubscriptions, err := getPendingSubscriptions(*dbClient)
+	schedulerLogger.Info("Scheduler triggered...")
 
+	pengingSubscriptions, err := getPendingSubscriptions(dbCtx, *dbClient)
 	if err != nil {
-		schedulerLogger.Error("getPendingSubscriptions err", schedulerLogger)
+		schedulerLogger.Error("getPendingSubscriptions err", err)
 		return
 	}
 
-	schedulerLogger.Info(fmt.Sprintf("Found %v subscriptions/tasks pending for execution...", len(pengingSubscriptions)))
-	if len(pengingSubscriptions) == 0 {
-		schedulerLogger.Info("Nothing to do!")
-		return
-	}
-
-	// select the same number of sensors that needs to do the tasks
-	sensors, err := chooseSensorsByRank(*dbClient, len(pengingSubscriptions))
+	sensors, err := chooseSensorsByRank(dbCtx, *dbClient)
 	if err != nil {
-		schedulerLogger.Error("chooseSensorsByRank err", schedulerLogger)
+		schedulerLogger.Error("chooseSensorsByRank err", err)
 		return
 	}
+
+	// important to keep this check as panic *may* occur later
 	if len(sensors) == 0 {
-		schedulerLogger.Error("no available sensors!")
+		schedulerLogger.Error("no available sensors")
 		return
 	}
 
-	// insert the new task to the db & publish to redis
-	j := 0
+	redisCtx, redisCancel := context.WithTimeout(ctx, cfg.RedisTimeout)
+	defer redisCancel()
+
 	for i := 0; i < len(pengingSubscriptions); i++ {
-		// if the subscriptions are more then the sensors, start from the first
-		if i > len(sensors)-1 {
-			j = 0
-		}
-		err := initSubscriptionTask(context.TODO(), pengingSubscriptions[i], sensors[j].ID, *dbClient, redisClient, schedulerLogger)
+		// this ensures a round-robin when tasks are more than the sensors
+		sensorIdx := i % len(sensors)
+
+		err := initSubscriptionTask(redisCtx, pengingSubscriptions[i], sensors[sensorIdx].ID, *dbClient, redisClient, schedulerLogger)
 		if err != nil {
-			schedulerLogger.Error("initSubscriptionTask err", schedulerLogger, err)
+			schedulerLogger.Errorf("initSubscriptionTask err: %v", err)
 			continue
 		}
-		j++
 	}
 }
 
-func initSubscriptionTask(ctx context.Context, subscription models.Subscription, sensorId uuid.UUID, gormClient gorm.DB, redisClient *redis.Client, schedulerLogger *logrus.Entry) (err error) {
+// initSubscriptionTask publishes to redis and writes in the DB, it has to be refactored
+func initSubscriptionTask(ctx context.Context,
+	subscription models.Subscription,
+	sensorId uuid.UUID,
+	gormClient gorm.DB,
+	redisClient *redis.Client,
+	schedulerLogger *logrus.Entry) (err error) {
 
 	// layer between subscription.Opts and task.Opts
 	taskOpts, err := factoryTaskOpts(subscription)
@@ -76,13 +101,12 @@ func initSubscriptionTask(ctx context.Context, subscription models.Subscription,
 		return
 	}
 
-	// lnsert the new task
 	newTask := models.Task{
 		ID:             uuid.New(),
 		TaskTypeID:     subscription.TaskTypeID,
 		SensorID:       sensorId,
 		SubscriptionID: subscription.ID,
-		TaskStatusID:   1, // INITIATED
+		TaskStatusID:   models.TASK_STATUS_INITIATED_BY_SCHEDULER,
 		Opts:           taskOpts,
 		CreatedAt:      time.Now(),
 	}
@@ -92,68 +116,71 @@ func initSubscriptionTask(ctx context.Context, subscription models.Subscription,
 		return
 	}
 
-	jsonMessage, err := factoryTaskMessage(newTask)
+	taskJson, err := factoryTaskMessage(newTask)
 	if err != nil {
 		return
 	}
 
 	schedulerLogger.Info(fmt.Sprintf("Publishing tasksID:%v, sensorID:%v", newTask.ID, newTask.SensorID))
 
-	// publish the message to the channel
-	result := redisClient.Publish(consts.SchedulerNewTaskChannel, jsonMessage)
+	result := redisClient.WithContext(ctx).Publish(consts.SchedulerNewTaskChannel, taskJson)
 	if result.Err() != nil {
 		err = fmt.Errorf("redisClient.Publish err:%v, tasksID:%v, sensorID:%v", result.Err().Error(), newTask.ID, newTask.SensorID)
 		return
 	}
 
-	transactionErr := gormClient.Transaction(func(tx *gorm.DB) error {
-
-		// update the task status to PUBLISHED_TO_REDIS_BY_SCHEDULER
-		updateTx := tx.Model(&models.Task{}).Where("id = ?", newTask.ID).Update("task_status_id", 2)
-		if updateTx.Error != nil {
-			err = fmt.Errorf("updating TaskStatusID err: %v", updateTx.Error)
-			return err
-		}
-
-		// clean the current adjusted rank
-		updateTx = tx.Model(&models.SensorRank{}).Where("sensor_id = ?", sensorId.String()).Update("distribution_rank", 0)
-		if updateTx.Error != nil {
-			err = fmt.Errorf("updating distribution rank err: %v", updateTx.Error)
-			return err
-		}
-
-		return nil
-	})
-
-	return transactionErr
-}
-
-func getPendingSubscriptions(gormClient gorm.DB) (clientSubscriptions []models.Subscription, err error) {
-	tx := gormClient.Where("tests_count_subscribed > tests_count_executed and ((last_execution_completed + period * interval '1 second') < ? or last_execution_completed IS NULL) AND is_active=true", time.Now()).Find(&clientSubscriptions)
-	if tx.Error != nil {
-		err = fmt.Errorf("getting ClientSubscription err:%v", tx.Error)
-		return
+	receiverCount, err := result.Result()
+	if err != nil {
+		return fmt.Errorf("failed to get publish result: %w", err)
 	}
-	return
+	if receiverCount == 0 {
+		return fmt.Errorf("no subscribers received task: taskID:%v, sensorID:%v", newTask.ID, newTask.SensorID)
+	}
+
+	// TODO: this should be done in batches to reduce DB load
+	return tx.Model(&models.Task{}).Where("id = ?", newTask.ID).Update("task_status_id", 2).Error
 }
 
-func chooseSensorsByRank(gormClient gorm.DB, numberOfSensors int) (sensors []models.Sensor, err error) { //nolint
+func getPendingSubscriptions(ctx context.Context, gormClient gorm.DB) ([]models.Subscription, error) {
+	var clientSubscriptions []models.Subscription
+	tx := gormClient.WithContext(ctx).Where(
+		"tests_count_subscribed > tests_count_executed and ((last_execution_completed + period * interval '1 second') < ? or last_execution_completed IS NULL) AND is_active=true",
+		time.Now(),
+	).Find(&clientSubscriptions)
 
-	// TODO: should be optimised; also check indexes;
-	err = gormClient.Raw(`WITH cte_sensors_latest AS (
-		SELECT max(id) as id
-			, sensor_id
-		FROM sensor_ranks
-		WHERE created_at > NOW() - INTERVAL '60 minutes'
-			AND rank > 0
-		GROUP BY sensor_id
-		LIMIT ?
-	)
-	SELECT sr.sensor_id as id
-	FROM cte_sensors_latest cte
-	INNER JOIN sensor_ranks sr ON (cte.id = sr.id)
-	GROUP BY sr.sensor_id
-	ORDER BY SUM(sr.rank + sr.distribution_rank) DESC`, numberOfSensors).Scan(&sensors).Error
+	if tx.Error != nil {
+		return nil, fmt.Errorf("getting ClientSubscription err:%w", tx.Error)
+	}
+	return clientSubscriptions, nil
+}
+
+func chooseSensorsByRank(ctx context.Context, gormClient gorm.DB) (sensors []models.Sensor, err error) { //nolint
+
+	// TODO: check indexes; add a coefficient to reduce the task count subtraction;
+	err = gormClient.Raw("" +
+		`WITH cte_sensors_latest AS (
+	SELECT max(id) AS id
+		, sensor_id
+	FROM sensor_ranks
+	WHERE created_at > NOW() - INTERVAL '60 minutes'
+		AND rank > 0
+	GROUP BY sensor_id
+)
+SELECT sr.sensor_id AS id, st.task_count
+FROM cte_sensors_latest cte
+INNER JOIN sensor_ranks sr ON (cte.id = sr.id)
+LEFT JOIN (
+    SELECT sensor_id, COUNT(*) as task_count
+    FROM tasks
+    WHERE created_at > NOW() - INTERVAL '10 minutes'
+    GROUP BY sensor_id
+) AS st ON st.sensor_id = sr.sensor_id
+ORDER BY (sr.rank - 
+    CASE 
+        WHEN st.task_count IS NOT NULL THEN st.task_count
+        ELSE 0
+    END
+) DESC`).WithContext(ctx).Scan(&sensors).Error
 
 	return
 }
