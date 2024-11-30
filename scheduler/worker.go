@@ -105,7 +105,7 @@ func initSubscriptionTask(ctx context.Context,
 		TaskTypeID:     subscription.TaskTypeID,
 		SensorID:       sensorId,
 		SubscriptionID: subscription.ID,
-		TaskStatusID:   1, // INITIATED
+		TaskStatusID:   models.TASK_STATUS_INITIATED_BY_SCHEDULER,
 		Opts:           taskOpts,
 		CreatedAt:      time.Now(),
 	}
@@ -136,6 +136,7 @@ func initSubscriptionTask(ctx context.Context,
 		return fmt.Errorf("no subscribers received task: taskID:%v, sensorID:%v", newTask.ID, newTask.SensorID)
 	}
 
+	// TODO: this should be done in batches to reduce DB load
 	return tx.Model(&models.Task{}).Where("id = ?", newTask.ID).Update("task_status_id", 2).Error
 }
 

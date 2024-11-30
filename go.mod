@@ -44,3 +44,5 @@ require (
 )
 
 // replace github.com/ping-42/42lib => ../42lib
+
+replace github.com/ping-42/42lib => /workspaces/42lib/
