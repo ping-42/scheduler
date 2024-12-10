@@ -1,5 +1,5 @@
 # Begin the proper packaging of the image to run the binary.
-FROM ubuntu:22.04
+FROM ubuntu:24.04
 
 ENV TZ UTC
 ENV LANG en_US.UTF-8
