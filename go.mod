@@ -9,7 +9,7 @@ require (
 	github.com/ping-42/42lib v0.1.45
 	github.com/sirupsen/logrus v1.9.3
 	github.com/stretchr/testify v1.10.0
-	gorm.io/gorm v1.25.12
+	gorm.io/gorm v1.26.1
 )
 
 require (
